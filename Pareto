@@ -1,0 +1,91 @@
+# Load data and inspect its structure
+data <- read.csv("wtid-report.csv")
+dim(data)
+head(data)
+
+# Prepare new dataset with selected columns
+data_new <- data[, -c(1, 3, 4, 8)]
+colnames(data_new) <- c("Year", "P99", "P99.5", "P99.9")
+head(data_new)
+
+# Function to calculate discrepancies in percentile ratios
+percentile_ratio_discrepancies <- function(a, x, y, z) {
+  ans <- (((x / z) ^ (-a + 1) - 10) ^ 2) +
+    (((y / z) ^ (-a + 1) - 5) ^ 2) +
+    (((x / y) ^ (-a + 1) - 2) ^ 2)
+  return(ans)
+}
+
+# Example usage of the function
+percentile_ratio_discrepancies(2, 1e6, 2e6, 1e7)
+
+# Initial estimate of the Pareto exponent (a) using log transformation
+start_a <- 1 - log(10) / log(1e6 / 1e7)
+
+# Function to calculate multi-ratio discrepancies
+exponent.multi_ratios_est <- function(a, x, y, z) {
+  T1 <- ((x / z) ^ (-a + 1) - 10) ^ 2
+  T2 <- ((y / z) ^ (-a + 1) - 5) ^ 2
+  T3 <- ((x / y) ^ (-a + 1) - 2) ^ 2
+  return(T1 + T2 + T3)
+}
+
+# Solve for the Pareto exponent (a) using optimization
+result <- nlm(function(a) exponent.multi_ratios_est(a, 1e6, 2e6, 1e7), p = start_a)
+estimated_a <- result$estimate
+
+# Print the estimated Pareto exponent
+print(estimated_a)
+
+# Function to estimate 'a' for each row of data
+calc_a <- function(row) {
+  start_a <- 1 - log(10) / log(row["P99"] / row["P99.9"])
+  result <- nlm(function(a) exponent.multi_ratios_est(a, row["P99"], row["P99.5"], row["P99.9"]), 
+                p = start_a)
+  return(result$estimate)
+}
+# Add 'a' values for each row using the calc_a function
+data_new$a <- apply(data_new, 1, calc_a)
+
+# Plot the scatterplot of estimated 'a' values over the years
+library(ggplot2)
+
+ggplot(data_new, aes(x = Year, y = a)) +
+  geom_point() +
+  labs(
+    x = "Year",
+    y = "Estimated 'a'",
+    title = "Estimated 'a' for Each Year"
+  )
+
+# Lab Section: Estimation of Pareto Exponent Using Ratios
+exponent.est_ratio <- function(x, y) {
+  a_est <- 1 - log(10) / log(x / y)
+  return(a_est)
+}
+
+# Example usage of Pareto exponent estimation
+exponent.est_ratio(1e6, 1e7)
+
+# Estimate 'a' using P99 and P99.5
+a_estimate_99_995 <- exponent.est_ratio(data_new$P99, data_new$P99.5)
+plot(a_estimate_99_995, type = "o", xlab = "Index", ylab = "Estimated 'a'", 
+     main = "Estimated 'a' from P99 and P99.5")
+
+# Estimate 'a' using P99.5 and P99.9
+a_estimate_995_999 <- exponent.est_ratio(data_new$P99.5, data_new$P99.9)
+plot(a_estimate_995_999, type = "o", xlab = "Index", ylab = "Estimated 'a'", 
+     main = "Estimated 'a' from P99.5 and P99.9")
+
+# Linear Regression: Fit a quadratic model to the estimated 'a' values
+fit <- lm(a ~ Year + I(Year^2), data = data_new)
+
+# Plot the data and add a quadratic regression line
+p <- ggplot(data_new, aes(x = Year, y = a)) +
+  geom_point() +
+  labs(
+    x = "Year",
+    y = "Estimated 'a'",
+    title = "Estimated 'a' for Each Year with Quadratic Fit"
+  )
+p + geom_smooth(method = "lm", formula = y ~ x + I(x^2), se = FALSE, color = "red")
